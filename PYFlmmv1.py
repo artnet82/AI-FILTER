@@ -1,30 +1,58 @@
 import torch
-from transformers import AutoTokenizer, AutoModel
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
 
-def check_forbidden_words(model_name, text, forbidden_words):
+def train_classifier(texts, labels):
+    # Инициализация токенизатора и векторизатора
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    vectorizer = TfidfVectorizer(tokenizer=tokenizer.tokenize)
+
+    # Векторизация текстов
+    X = vectorizer.fit_transform(texts)
+
+    # Обучение классификатора
+    classifier = LogisticRegression()
+    classifier.fit(X, labels)
+
+    return classifier, vectorizer
+
+def check_forbidden_words(model_name, text, forbidden_words, classifier, vectorizer):
     # Загрузка токенизатора и модели
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModel.from_pretrained(model_name)
+    tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+    model = GPT2LMHeadModel.from_pretrained(model_name)
 
     # Токенизация текста
-    tokens = tokenizer.tokenize(text)
-    input_ids = tokenizer.convert_tokens_to_ids(tokens)
-    input_tensor = torch.tensor([input_ids])
+    input_ids = tokenizer.encode(text, return_tensors='pt')
 
-    # Применение модели к токенизированному тексту
-    model_output = model(input_tensor)
+    # Генерация текста с помощью модели
+    output = model.generate(input_ids, max_length=100, num_return_sequences=1)
+    generated_text = tokenizer.decode(output[0], skip_special_tokens=True)
 
-    # Проверка наличия запрещенных слов
-    for word in forbidden_words:
-        if word in text:
-            print(f"Обнаружено запрещенное слово: {word}")
+    # Векторизация сгенерированного текста
+    X_generated = vectorizer.transform([generated_text])
+
+    # Классификация сгенерированного текста
+    predicted_label = classifier.predict(X_generated)[0]
+
+    # Проверка наличия запрещенных слов, если классификатор предсказал положительный результат
+    if predicted_label == 1:
+        for word in forbidden_words:
+            if word in generated_text:
+                print(f"Обнаружено запрещенное слово: {word}")
 
 def main():
-    model_name = "model_name"  # Замените на имя или путь к вашей модели
-    text = "Пример текста для проверки модели на запрещенные слова."
+    model_name = "gpt2"  # Замените на имя или путь к вашей модели
+    text = "Пример начального текста для генерации."
     forbidden_words = ["запрещенное", "слово", "недопустимое"]  # Список запрещенных слов
 
-    check_forbidden_words(model_name, text, forbidden_words)
+    # Обучение классификатора
+    texts = ["Пример текста без запрещенных слов.", "Пример текста с запрещенными словами."]
+    labels = [0, 1]
+    classifier, vectorizer = train_classifier(texts, labels)
+
+    # Проверка сгенерированного текста на запрещенные слова
+    check_forbidden_words(model_name, text, forbidden_words, classifier, vectorizer)
 
 if __name__ == '__main__':
     main()
